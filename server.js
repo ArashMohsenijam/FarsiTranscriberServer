@@ -8,11 +8,15 @@ const path = require('path');
 const { optimizeAudio } = require('./utils/audioOptimizer');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+const OpenAI = require('openai');
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 require('dotenv').config();
 
 const app = express();
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
 // Ensure upload and optimized directories exist
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -160,11 +164,15 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
     console.log('Transcription received, length:', transcription.length);
     console.log('Transcription text:', transcription);
     
-    // Send the final transcription result
+    // Improve transcription with GPT-4
+    sendStatus('Improving transcription', 90);
+    const improvedTranscription = await improveTranscription(transcription);
+    
+    // Send the final improved transcription result
     res.write(`data: ${JSON.stringify({ 
       status: 'Complete',
       progress: 100,
-      transcription: transcription 
+      transcription: improvedTranscription 
     })}\n\n`);
     res.end();
   } catch (error) {
@@ -179,6 +187,27 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
     cleanup();
   }
 });
+
+async function improveTranscription(transcription) {
+  try {
+    console.log('Improving transcription with GPT-4...');
+    const prompt = `read and fix this transcript for word and grammatical errors, keep the language as Farsi and return it in the same Farsi language:\n\n${transcription}`;
+    
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        { role: "system", content: "You are a helpful assistant that improves Farsi transcriptions while maintaining the original meaning and language." },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.3,
+    });
+
+    return completion.choices[0].message.content;
+  } catch (error) {
+    console.error('Error improving transcription:', error);
+    return transcription; // Return original if improvement fails
+  }
+}
 
 const port = process.env.PORT || 10000;
 const server = app.listen(port, '0.0.0.0', (err) => {
