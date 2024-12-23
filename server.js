@@ -177,7 +177,26 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
   }
 });
 
-const port = process.env.PORT || 3001;
-app.listen(port, () => {
+const port = process.env.PORT || 10000;
+const server = app.listen(port, '0.0.0.0', (err) => {
+  if (err) {
+    console.error('Error starting server:', err);
+    process.exit(1);
+  }
   console.log(`Server running on port ${port}`);
+});
+
+// Handle server errors
+server.on('error', (err) => {
+  console.error('Server error:', err);
+  process.exit(1);
+});
+
+// Handle process termination
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
 });
