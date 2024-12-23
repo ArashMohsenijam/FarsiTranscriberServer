@@ -110,19 +110,19 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
     }
 
     console.log('File received:', req.file.originalname);
-    sendStatus('Uploading', 33);
+    sendStatus('Uploading', 20);
 
     // Optimize audio file
     console.log('Optimizing audio...');
-    sendStatus('Optimizing', 50);
+    sendStatus('Optimizing', 40);
     const optimizedPath = await optimizeAudio(req.file.path);
     
     console.log('Optimized file path:', optimizedPath);
-    sendStatus('Transcribing', 75);
+    sendStatus('Transcribing', 60);
 
     // Verify optimized file exists and is readable
     if (!fs.existsSync(optimizedPath)) {
-      throw new Error('Optimized file not found');
+      throw new Error('Failed to optimize audio file');
     }
 
     const stats = fs.statSync(optimizedPath);
@@ -132,6 +132,7 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
       permissions: stats.mode
     });
 
+    // Create form data for OpenAI API
     const formData = new FormData();
     formData.append('file', fs.createReadStream(optimizedPath));
     formData.append('model', 'whisper-1');
@@ -152,17 +153,19 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
     
     if (!response.ok) {
       const errorData = await response.text();
-      console.error('OpenAI API Error:', {
-        status: response.status,
-        statusText: response.statusText,
+      console.error('OpenAI API error response:', errorData);
+      res.write(`data: ${JSON.stringify({ 
+        status: 'Error',
+        progress: 0,
         error: errorData
-      });
+      })}\n\n`);
       throw new Error(`OpenAI API error: ${errorData}`);
     }
 
     const transcription = await response.text();
     console.log('Transcription received, length:', transcription.length);
     console.log('Transcription text:', transcription);
+    sendStatus('Transcribing', 80);
     
     // Improve transcription with GPT-4
     sendStatus('Improving transcription', 90);
