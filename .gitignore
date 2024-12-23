@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+
+# Uploads and optimized files
+uploads/*
+optimized/*
+!uploads/.gitkeep
+!optimized/.gitkeep
+
+# OS files
+.DS_Store
+Thumbs.db
