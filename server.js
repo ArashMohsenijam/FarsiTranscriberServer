@@ -52,6 +52,11 @@ if (!OPENAI_API_KEY) {
   process.exit(1);
 }
 
+// Add root endpoint for health check
+app.get('/', (req, res) => {
+  res.json({ status: 'ok', message: 'FarsiTranscriber API is running' });
+});
+
 app.post('/api/transcribe', upload.single('file'), async (req, res) => {
   const cleanup = () => {
     try {
