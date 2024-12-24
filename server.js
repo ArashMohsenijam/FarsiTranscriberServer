@@ -360,8 +360,8 @@ async function improveTranscription(text) {
           }
         ],
         temperature: 0.3,
-        max_tokens: 4000,
-        max_completion_tokens: 2000
+        max_tokens: 128000,  
+        max_completion_tokens: 128000  
       })
     });
 
