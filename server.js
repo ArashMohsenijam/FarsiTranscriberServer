@@ -393,7 +393,6 @@ Return only the improved Farsi text without any explanations or notes.`
           }
         ],
         temperature: 0.3,
-        max_tokens: 128000,
         max_completion_tokens: 128000
       })
     });
