@@ -66,8 +66,19 @@ app.get('/', (req, res) => {
 });
 
 app.post('/api/transcribe', upload.single('file'), async (req, res) => {
+  let currentProcess = null;
+
   const cleanup = () => {
     try {
+      // Kill any running ffmpeg process
+      if (currentProcess) {
+        try {
+          currentProcess.kill();
+        } catch (error) {
+          console.error('Error killing process:', error);
+        }
+      }
+
       // Clean up uploaded file
       if (req.file?.path && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
@@ -81,6 +92,12 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
       console.error('Cleanup error:', error);
     }
   };
+
+  // Handle client disconnection
+  req.on('close', () => {
+    console.log('Client disconnected, cleaning up...');
+    cleanup();
+  });
 
   const sendStatus = (status, progress = 0) => {
     try {
@@ -118,7 +135,26 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
     if (shouldOptimizeAudio) {
       console.log('Optimizing audio...');
       sendStatus('Optimizing', 40);
-      audioPath = await optimizeAudio(req.file.path);
+      audioPath = await new Promise((resolve, reject) => {
+        const outputPath = path.join(optimizedDir, path.basename(req.file.path) + '.mp3');
+        
+        const process = ffmpeg(req.file.path)
+          .toFormat('mp3')
+          .on('error', (err) => {
+            console.error('FFmpeg error:', err);
+            reject(err);
+          })
+          .on('end', () => {
+            console.log('FFmpeg process completed');
+            resolve(outputPath);
+          });
+
+        // Store the process so we can kill it if needed
+        currentProcess = process;
+        
+        process.save(outputPath);
+      });
+      
       console.log('Optimized file path:', audioPath);
       sendStatus('Transcribing', 60);
     } else {
