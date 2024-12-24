@@ -68,10 +68,11 @@ app.get('/', (req, res) => {
 app.post('/api/transcribe', upload.single('file'), async (req, res) => {
   const cleanup = () => {
     try {
-      if (req.file && fs.existsSync(req.file.path)) {
+      // Clean up uploaded file
+      if (req.file?.path && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
-      // Clean up optimized file if it exists
+      // Clean up optimized file
       const optimizedPath = path.join(optimizedDir, path.basename(req.file?.path || '') + '.mp3');
       if (fs.existsSync(optimizedPath)) {
         fs.unlinkSync(optimizedPath);
@@ -98,35 +99,41 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
       throw new Error('No file uploaded');
     }
 
-    console.log('File details:', {
-      name: req.file.originalname,
-      size: req.file.size,
-      type: req.file.mimetype,
-      path: req.file.path
-    });
+    // Parse workflow options from form data
+    console.log('Form data:', req.body);
+    const shouldOptimizeAudio = req.body.optimizeAudio === 'true';
+    const shouldImproveTranscription = req.body.improveTranscription === 'true';
 
-    if (!req.file.mimetype?.startsWith('audio/')) {
-      throw new Error('Invalid file type. Please upload an audio file.');
-    }
+    console.log('Workflow options:', {
+      optimizeAudio: shouldOptimizeAudio,
+      improveTranscription: shouldImproveTranscription
+    });
 
     console.log('File received:', req.file.originalname);
     sendStatus('Uploading', 20);
 
-    // Optimize audio file
-    console.log('Optimizing audio...');
-    sendStatus('Optimizing', 40);
-    const optimizedPath = await optimizeAudio(req.file.path);
+    let audioPath = req.file.path;
     
-    console.log('Optimized file path:', optimizedPath);
-    sendStatus('Transcribing', 60);
-
-    // Verify optimized file exists and is readable
-    if (!fs.existsSync(optimizedPath)) {
-      throw new Error('Failed to optimize audio file');
+    // Only optimize if the option is enabled
+    if (shouldOptimizeAudio) {
+      console.log('Optimizing audio...');
+      sendStatus('Optimizing', 40);
+      audioPath = await optimizeAudio(req.file.path);
+      console.log('Optimized file path:', audioPath);
+      sendStatus('Transcribing', 60);
+    } else {
+      console.log('Skipping audio optimization');
+      sendStatus('Transcribing', 40);
     }
 
-    const stats = fs.statSync(optimizedPath);
-    console.log('Optimized file stats:', {
+    // Verify file exists and is readable
+    if (!fs.existsSync(audioPath)) {
+      throw new Error('Audio file not found');
+    }
+
+    const stats = fs.statSync(audioPath);
+    console.log('Audio file stats:', {
+      path: audioPath,
       size: stats.size,
       isFile: stats.isFile(),
       permissions: stats.mode
@@ -134,7 +141,7 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
 
     // Create form data for OpenAI API
     const formData = new FormData();
-    formData.append('file', fs.createReadStream(optimizedPath));
+    formData.append('file', fs.createReadStream(audioPath));
     formData.append('model', 'whisper-1');
     formData.append('language', 'fa');
     formData.append('response_format', 'text');
@@ -162,20 +169,26 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
       throw new Error(`OpenAI API error: ${errorData}`);
     }
 
-    const transcription = await response.text();
+    let transcription = await response.text();
     console.log('Transcription received, length:', transcription.length);
-    console.log('Transcription text:', transcription);
-    sendStatus('Transcribing', 80);
     
-    // Improve transcription with GPT-4
-    sendStatus('Improving transcription', 90);
-    const improvedTranscription = await improveTranscription(transcription);
+    // Only improve transcription if the option is enabled
+    if (shouldImproveTranscription) {
+      console.log('Improving transcription with GPT-4...');
+      sendStatus('Improving transcription', 80);
+      transcription = await improveTranscription(transcription);
+      console.log('Transcription improved');
+      sendStatus('Complete', 100);
+    } else {
+      console.log('Skipping transcription improvement');
+      sendStatus('Complete', 100);
+    }
     
-    // Send the final improved transcription result
+    // Send the final transcription result
     res.write(`data: ${JSON.stringify({ 
       status: 'Complete',
       progress: 100,
-      transcription: improvedTranscription 
+      transcription: transcription 
     })}\n\n`);
     res.end();
   } catch (error) {
