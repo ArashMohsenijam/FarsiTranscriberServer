@@ -209,10 +209,10 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
       throw new Error('No file uploaded');
     }
 
-    // Parse workflow options from form data
+    // Parse workflow options from form data with defaults
     console.log('Form data:', req.body);
-    const shouldOptimizeAudio = req.body.optimizeAudio === 'true';
-    const shouldImproveTranscription = req.body.improveTranscription === 'true';
+    const shouldOptimizeAudio = req.body.optimizeAudio === 'true' || false; // Default to false
+    const shouldImproveTranscription = req.body.improveTranscription === 'true' || true; // Default to true
 
     console.log('Workflow options:', {
       optimizeAudio: shouldOptimizeAudio,
