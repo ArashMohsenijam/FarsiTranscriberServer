@@ -179,7 +179,7 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
     // Transcription step
     res.write(`data: ${JSON.stringify({ status: 'Transcribing audio...', progress: 30 })}\n\n`);
     const fileToTranscribe = optimizedFilePath || originalFilePath;
-    console.log('Audio file stats:', await fs.stat(fileToTranscribe));
+    console.log('Audio file stats:', await fs.promises.stat(fileToTranscribe));
     
     transcriptionText = await transcribeAudio(fileToTranscribe);
     console.log('Transcription received, length:', transcriptionText.length);
@@ -210,9 +210,11 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
 
     // Cleanup files
     try {
-      await fs.unlink(originalFilePath);
+      if (originalFilePath) {
+        await fs.promises.unlink(originalFilePath);
+      }
       if (optimizedFilePath) {
-        await fs.unlink(optimizedFilePath);
+        await fs.promises.unlink(optimizedFilePath);
       }
     } catch (error) {
       console.error('Error cleaning up files:', error);
@@ -225,8 +227,12 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
 
     // Cleanup files on error
     try {
-      if (originalFilePath) await fs.unlink(originalFilePath);
-      if (optimizedFilePath) await fs.unlink(optimizedFilePath);
+      if (originalFilePath) {
+        await fs.promises.unlink(originalFilePath);
+      }
+      if (optimizedFilePath) {
+        await fs.promises.unlink(optimizedFilePath);
+      }
     } catch (cleanupError) {
       console.error('Error cleaning up files after error:', cleanupError);
     }
