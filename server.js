@@ -130,6 +130,7 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
     sendStatus('Uploading', 20);
 
     let audioPath = req.file.path;
+    let finalPath = audioPath;
     
     // Only optimize if the option is enabled
     if (shouldOptimizeAudio) {
@@ -154,22 +155,24 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
         
         process.save(outputPath);
       });
-      
-      console.log('Optimized file path:', audioPath);
-      sendStatus('Transcribing', 60);
+      finalPath = audioPath;
     } else {
-      console.log('Skipping audio optimization');
+      // If not optimizing, ensure the file has a proper extension
+      const tempPath = path.join(optimizedDir, path.basename(req.file.path) + '.mp3');
+      await fs.promises.copyFile(audioPath, tempPath);
+      finalPath = tempPath;
+      console.log('Skipping audio optimization, using copied file:', finalPath);
       sendStatus('Transcribing', 40);
     }
 
     // Verify file exists and is readable
-    if (!fs.existsSync(audioPath)) {
+    if (!fs.existsSync(finalPath)) {
       throw new Error('Audio file not found');
     }
 
-    const stats = fs.statSync(audioPath);
+    const stats = fs.statSync(finalPath);
     console.log('Audio file stats:', {
-      path: audioPath,
+      path: finalPath,
       size: stats.size,
       isFile: stats.isFile(),
       permissions: stats.mode
@@ -177,7 +180,7 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
 
     // Create form data for OpenAI API
     const formData = new FormData();
-    formData.append('file', fs.createReadStream(audioPath));
+    formData.append('file', fs.createReadStream(finalPath));
     formData.append('model', 'whisper-1');
     formData.append('language', 'fa');
     formData.append('response_format', 'text');
