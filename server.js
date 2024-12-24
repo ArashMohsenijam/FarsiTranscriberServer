@@ -307,24 +307,32 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
     let transcription = await response.text();
     console.log('Transcription received, length:', transcription.length);
     
-    // Only improve transcription if the option is enabled
+    // Send the transcription result
     if (shouldImproveTranscription) {
-      console.log('Improving transcription with GPT-4...');
-      sendStatus('Improving transcription', 80);
-      transcription = await improveTranscription(transcription);
-      console.log('Transcription improved');
-      sendStatus('Complete', 100);
+      console.log('Improving transcription...');
+      sendStatus('Improving', 80);
+      const improvedText = await improveTranscription(transcription);
+      sendStatus('Done', 100);
+      res.write(`data: ${JSON.stringify({ 
+        status: 'Done', 
+        progress: 100,
+        result: {
+          original: transcription,
+          improved: improvedText
+        }
+      })}\n\n`);
     } else {
-      console.log('Skipping transcription improvement');
-      sendStatus('Complete', 100);
+      sendStatus('Done', 100);
+      res.write(`data: ${JSON.stringify({ 
+        status: 'Done', 
+        progress: 100,
+        result: {
+          original: transcription,
+          improved: null
+        }
+      })}\n\n`);
     }
     
-    // Send the final transcription result
-    res.write(`data: ${JSON.stringify({ 
-      status: 'Complete',
-      progress: 100,
-      transcription: transcription 
-    })}\n\n`);
     res.end();
   } catch (error) {
     console.error('Server error:', error);
@@ -351,45 +359,42 @@ async function improveTranscription(text) {
         model: "o1-mini",
         messages: [
           {
-            role: "system",
-            content: `You are a highly skilled Farsi (Persian) language expert specializing in transcription improvement. Your tasks include:
+            role: "user",
+            content: `You are a Farsi (Persian) language expert. Please improve this Farsi transcription by:
 
-1. Fix common Whisper transcription errors in Farsi:
+1. Fixing common transcription errors:
    - Correct word boundaries and spacing
    - Fix homophone confusions
    - Correct dialectal variations to standard Farsi
    - Handle informal/spoken Farsi appropriately
 
-2. Improve text readability:
+2. Improving readability:
    - Use proper punctuation (،٫؛؟)
    - Format numbers and dates correctly
    - Maintain proper paragraph structure
    - Use standard Persian numerals when appropriate
 
-3. Grammar and style:
+3. Fixing grammar and style:
    - Fix verb conjugations and tense consistency
    - Correct ezāfe constructions
    - Ensure subject-verb agreement
    - Maintain formal/informal tone consistency
 
-4. Preserve authenticity:
+4. Preserving authenticity:
    - Keep colloquial expressions when intentional
    - Maintain speaker's dialect markers if significant
    - Preserve technical terms and proper nouns
-   - Keep original meaning intact
+
+Here is the text to improve:
+
+${text}
 
 Return only the improved Farsi text without any explanations or notes.`
-          },
-          {
-            role: "user",
-            content: `لطفا این متن فارسی را با حفظ معنی و سبک اصلی بهبود دهید. فقط متن بهبود یافته را برگردانید:
-
-${text}`
           }
         ],
         temperature: 0.3,
-        max_tokens: 128000,  
-        max_completion_tokens: 128000  
+        max_tokens: 128000,
+        max_completion_tokens: 128000
       })
     });
 
