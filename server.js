@@ -339,24 +339,43 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
   }
 });
 
-async function improveTranscription(transcription) {
+async function improveTranscription(text) {
   try {
-    console.log('Improving transcription with GPT-4...');
-    const prompt = `read and fix this transcript for word and grammatical errors, keep the language as Farsi and return it in the same Farsi language:\n\n${transcription}`;
-    
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        { role: "system", content: "You are a helpful assistant that improves Farsi transcriptions while maintaining the original meaning and language." },
-        { role: "user", content: prompt }
-      ],
-      temperature: 0.3,
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: "o1-mini",
+        messages: [
+          {
+            role: "system",
+            content: "You are a Farsi (Persian) text improvement expert. Your task is to correct any transcription errors, fix grammar, and improve the text while maintaining its original meaning. Keep the text in Farsi and make it more natural and readable."
+          },
+          {
+            role: "user",
+            content: `Please improve this Farsi transcription: ${text}`
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 4000,
+        max_completion_tokens: 2000
+      })
     });
 
-    return completion.choices[0].message.content;
+    if (!response.ok) {
+      const error = await response.json();
+      console.error('OpenAI API error:', error);
+      throw new Error(`OpenAI API error: ${JSON.stringify(error)}`);
+    }
+
+    const data = await response.json();
+    return data.choices[0].message.content;
   } catch (error) {
     console.error('Error improving transcription:', error);
-    return transcription; // Return original if improvement fails
+    return text;
   }
 }
 
