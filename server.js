@@ -352,11 +352,39 @@ async function improveTranscription(text) {
         messages: [
           {
             role: "system",
-            content: "You are a Farsi (Persian) text improvement expert. Your task is to correct any transcription errors, fix grammar, and improve the text while maintaining its original meaning. Keep the text in Farsi and make it more natural and readable."
+            content: `You are a highly skilled Farsi (Persian) language expert specializing in transcription improvement. Your tasks include:
+
+1. Fix common Whisper transcription errors in Farsi:
+   - Correct word boundaries and spacing
+   - Fix homophone confusions
+   - Correct dialectal variations to standard Farsi
+   - Handle informal/spoken Farsi appropriately
+
+2. Improve text readability:
+   - Use proper punctuation (،٫؛؟)
+   - Format numbers and dates correctly
+   - Maintain proper paragraph structure
+   - Use standard Persian numerals when appropriate
+
+3. Grammar and style:
+   - Fix verb conjugations and tense consistency
+   - Correct ezāfe constructions
+   - Ensure subject-verb agreement
+   - Maintain formal/informal tone consistency
+
+4. Preserve authenticity:
+   - Keep colloquial expressions when intentional
+   - Maintain speaker's dialect markers if significant
+   - Preserve technical terms and proper nouns
+   - Keep original meaning intact
+
+Return only the improved Farsi text without any explanations or notes.`
           },
           {
             role: "user",
-            content: `Please improve this Farsi transcription: ${text}`
+            content: `لطفا این متن فارسی را با حفظ معنی و سبک اصلی بهبود دهید. فقط متن بهبود یافته را برگردانید:
+
+${text}`
           }
         ],
         temperature: 0.3,
