@@ -18,13 +18,32 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// Ensure upload and optimized directories exist
+// Keep track of active connections and processes
+const activeConnections = new Set();
+const activeProcesses = new Set();
+
+// Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, 'uploads');
 const optimizedDir = path.join(__dirname, 'optimized');
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
-if (!fs.existsSync(optimizedDir)) fs.mkdirSync(optimizedDir);
 
-const upload = multer({ dest: uploadsDir });
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir);
+}
+if (!fs.existsSync(optimizedDir)) {
+  fs.mkdirSync(optimizedDir);
+}
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadsDir);
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + '-' + file.originalname);
+  }
+});
+
+const upload = multer({ storage: storage });
 
 // Configure CORS
 const allowedOrigins = [
@@ -60,13 +79,91 @@ if (!OPENAI_API_KEY) {
   process.exit(1);
 }
 
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('Global error handler:', err);
+  cleanup();
+  res.status(500).json({ error: 'Server error: ' + err.message });
+});
+
+// Graceful shutdown function
+async function cleanup() {
+  console.log('Starting cleanup...');
+  
+  // Clean up active FFmpeg processes
+  for (const process of activeProcesses) {
+    try {
+      process.kill();
+      activeProcesses.delete(process);
+    } catch (error) {
+      console.error('Error killing process:', error);
+    }
+  }
+
+  // Clean up files
+  try {
+    const uploadFiles = fs.readdirSync(uploadsDir);
+    const optimizedFiles = fs.readdirSync(optimizedDir);
+
+    for (const file of uploadFiles) {
+      fs.unlinkSync(path.join(uploadsDir, file));
+    }
+    for (const file of optimizedFiles) {
+      fs.unlinkSync(path.join(optimizedDir, file));
+    }
+  } catch (error) {
+    console.error('Error cleaning up files:', error);
+  }
+
+  // Close active connections
+  for (const res of activeConnections) {
+    try {
+      res.end();
+      activeConnections.delete(res);
+    } catch (error) {
+      console.error('Error closing connection:', error);
+    }
+  }
+
+  console.log('Cleanup completed');
+}
+
+// Handle process termination
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  await cleanup();
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, shutting down gracefully');
+  await cleanup();
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
+
 // Add root endpoint for health check
 app.get('/', (req, res) => {
   res.json({ status: 'ok', message: 'FarsiTranscriber API is running' });
 });
 
 app.post('/api/transcribe', upload.single('file'), async (req, res) => {
+  // Add response to active connections
+  activeConnections.add(res);
   let currentProcess = null;
+
+  const sendStatus = (status, progress = 0) => {
+    try {
+      res.write(`data: ${JSON.stringify({ status, progress })}\n\n`);
+    } catch (error) {
+      console.error('Error sending status:', error);
+    }
+  };
 
   const cleanup = () => {
     try {
@@ -74,6 +171,7 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
       if (currentProcess) {
         try {
           currentProcess.kill();
+          activeProcesses.delete(currentProcess);
         } catch (error) {
           console.error('Error killing process:', error);
         }
@@ -88,6 +186,9 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
       if (fs.existsSync(optimizedPath)) {
         fs.unlinkSync(optimizedPath);
       }
+
+      // Remove response from active connections
+      activeConnections.delete(res);
     } catch (error) {
       console.error('Cleanup error:', error);
     }
@@ -98,14 +199,6 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
     console.log('Client disconnected, cleaning up...');
     cleanup();
   });
-
-  const sendStatus = (status, progress = 0) => {
-    try {
-      res.write(`data: ${JSON.stringify({ status, progress })}\n\n`);
-    } catch (error) {
-      console.error('Error sending status:', error);
-    }
-  };
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -143,15 +236,18 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
           .toFormat('mp3')
           .on('error', (err) => {
             console.error('FFmpeg error:', err);
+            activeProcesses.delete(process);
             reject(err);
           })
           .on('end', () => {
             console.log('FFmpeg process completed');
+            activeProcesses.delete(process);
             resolve(outputPath);
           });
 
         // Store the process so we can kill it if needed
         currentProcess = process;
+        activeProcesses.add(process);
         
         process.save(outputPath);
       });
@@ -274,16 +370,8 @@ const server = app.listen(port, '0.0.0.0', (err) => {
 });
 
 // Handle server errors
-server.on('error', (err) => {
-  console.error('Server error:', err);
+server.on('error', async (error) => {
+  console.error('Server error:', error);
+  await cleanup();
   process.exit(1);
-});
-
-// Handle process termination
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
 });
