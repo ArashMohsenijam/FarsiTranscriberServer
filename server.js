@@ -1,12 +1,12 @@
 const express = require('express');
-const cors = require('cors');
 const multer = require('multer');
+const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
+const ffmpeg = require('fluent-ffmpeg');
 const FormData = require('form-data');
 const fetch = require('node-fetch');
-const fs = require('fs');
-const path = require('path');
 const { optimizeAudio } = require('./utils/audioOptimizer');
-const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const OpenAI = require('openai');
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -241,18 +241,18 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
 
 async function transcribeAudio(filePath) {
   try {
+    const formData = new FormData();
+    formData.append('file', fs.createReadStream(filePath));
+    formData.append('model', 'whisper-1');
+    formData.append('language', 'fa');
+    formData.append('response_format', 'text');
+
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model: "whisper-1",
-        file: filePath,
-        language: "fa",
-        response_format: "text"
-      })
+      body: formData
     });
 
     if (!response.ok) {
@@ -261,7 +261,7 @@ async function transcribeAudio(filePath) {
       throw new Error(`OpenAI API error: ${errorData}`);
     }
 
-    let transcription = await response.text();
+    const transcription = await response.text();
     console.log('Transcription received, length:', transcription.length);
     return transcription;
   } catch (error) {
