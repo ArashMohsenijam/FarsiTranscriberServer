@@ -360,39 +360,20 @@ async function improveTranscription(text) {
         messages: [
           {
             role: "user",
-            content: `You are a Farsi (Persian) language expert. Please improve this Farsi transcription by:
+            content: `Please improve this Farsi transcription by:
+1. Fixing transcription errors (word boundaries, homophones, dialectal variations)
+2. Adding proper punctuation (،٫؛؟)
+3. Correcting grammar and style
+4. Preserving authentic expressions and technical terms
 
-1. Fixing common transcription errors:
-   - Correct word boundaries and spacing
-   - Fix homophone confusions
-   - Correct dialectal variations to standard Farsi
-   - Handle informal/spoken Farsi appropriately
-
-2. Improving readability:
-   - Use proper punctuation (،٫؛؟)
-   - Format numbers and dates correctly
-   - Maintain proper paragraph structure
-   - Use standard Persian numerals when appropriate
-
-3. Fixing grammar and style:
-   - Fix verb conjugations and tense consistency
-   - Correct ezāfe constructions
-   - Ensure subject-verb agreement
-   - Maintain formal/informal tone consistency
-
-4. Preserving authenticity:
-   - Keep colloquial expressions when intentional
-   - Maintain speaker's dialect markers if significant
-   - Preserve technical terms and proper nouns
-
-Here is the text to improve:
+Here is the text:
 
 ${text}
 
-Return only the improved Farsi text without any explanations or notes.`
+Return only the improved text without explanations.`
           }
         ],
-        max_completion_tokens: 128000
+        max_completion_tokens: 65536
       })
     });
 
