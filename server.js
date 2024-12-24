@@ -153,199 +153,116 @@ app.get('/', (req, res) => {
 });
 
 app.post('/api/transcribe', upload.single('file'), async (req, res) => {
-  // Add response to active connections
-  activeConnections.add(res);
-  let currentProcess = null;
-
-  const sendStatus = (status, progress = 0) => {
-    try {
-      res.write(`data: ${JSON.stringify({ status, progress })}\n\n`);
-    } catch (error) {
-      console.error('Error sending status:', error);
-    }
-  };
-
-  const cleanup = () => {
-    try {
-      // Kill any running ffmpeg process
-      if (currentProcess) {
-        try {
-          currentProcess.kill();
-          activeProcesses.delete(currentProcess);
-        } catch (error) {
-          console.error('Error killing process:', error);
-        }
-      }
-
-      // Clean up uploaded file
-      if (req.file?.path && fs.existsSync(req.file.path)) {
-        fs.unlinkSync(req.file.path);
-      }
-      // Clean up optimized file
-      const optimizedPath = path.join(optimizedDir, path.basename(req.file?.path || '') + '.mp3');
-      if (fs.existsSync(optimizedPath)) {
-        fs.unlinkSync(optimizedPath);
-      }
-
-      // Remove response from active connections
-      activeConnections.delete(res);
-    } catch (error) {
-      console.error('Cleanup error:', error);
-    }
-  };
-
-  // Handle client disconnection
-  req.on('close', () => {
-    console.log('Client disconnected, cleaning up...');
-    cleanup();
-  });
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
+  const shouldOptimizeAudio = req.body.optimizeAudio === 'true';
+  const shouldImproveTranscription = req.body.improveTranscription === 'true';
+  let originalFilePath = req.file.path;
+  let optimizedFilePath = null;
+  let transcriptionText = '';
+  let improvedText = null;
 
   try {
-    if (!req.file) {
-      throw new Error('No file uploaded');
-    }
-
-    // Parse workflow options from form data with defaults
-    console.log('Form data:', req.body);
-    const shouldOptimizeAudio = req.body.optimizeAudio === 'true' || false; // Default to false
-    const shouldImproveTranscription = req.body.improveTranscription === 'true' || true; // Default to true
-
-    console.log('Workflow options:', {
-      optimizeAudio: shouldOptimizeAudio,
-      improveTranscription: shouldImproveTranscription
+    // Send initial status
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive'
     });
 
-    console.log('File received:', req.file.originalname);
-    sendStatus('Uploading', 20);
-
-    let audioPath = req.file.path;
-    let finalPath = audioPath;
-    
-    // Only optimize if the option is enabled
+    // Audio optimization step
     if (shouldOptimizeAudio) {
-      console.log('Optimizing audio...');
-      sendStatus('Optimizing', 40);
-      audioPath = await new Promise((resolve, reject) => {
-        const outputPath = path.join(optimizedDir, path.basename(req.file.path) + '.mp3');
-        
-        const process = ffmpeg(req.file.path)
-          .toFormat('mp3')
-          .on('error', (err) => {
-            console.error('FFmpeg error:', err);
-            activeProcesses.delete(process);
-            reject(err);
-          })
-          .on('end', () => {
-            console.log('FFmpeg process completed');
-            activeProcesses.delete(process);
-            resolve(outputPath);
-          });
-
-        // Store the process so we can kill it if needed
-        currentProcess = process;
-        activeProcesses.add(process);
-        
-        process.save(outputPath);
-      });
-      finalPath = audioPath;
-    } else {
-      // If not optimizing, ensure the file has a proper extension
-      const tempPath = path.join(optimizedDir, path.basename(req.file.path) + '.mp3');
-      await fs.promises.copyFile(audioPath, tempPath);
-      finalPath = tempPath;
-      console.log('Skipping audio optimization, using copied file:', finalPath);
-      sendStatus('Transcribing', 40);
+      res.write(`data: ${JSON.stringify({ status: 'Optimizing audio...', progress: 0 })}\n\n`);
+      optimizedFilePath = path.join(__dirname, 'optimized', `${Date.now()}-${path.basename(req.file.path)}.mp3`);
+      await optimizeAudio(originalFilePath, optimizedFilePath);
+      res.write(`data: ${JSON.stringify({ status: 'Audio optimization complete', progress: 20 })}\n\n`);
     }
 
-    // Verify file exists and is readable
-    if (!fs.existsSync(finalPath)) {
-      throw new Error('Audio file not found');
+    // Transcription step
+    res.write(`data: ${JSON.stringify({ status: 'Transcribing audio...', progress: 30 })}\n\n`);
+    const fileToTranscribe = optimizedFilePath || originalFilePath;
+    console.log('Audio file stats:', await fs.stat(fileToTranscribe));
+    
+    transcriptionText = await transcribeAudio(fileToTranscribe);
+    console.log('Transcription received, length:', transcriptionText.length);
+    res.write(`data: ${JSON.stringify({ status: 'Transcription complete', progress: 80 })}\n\n`);
+
+    // Text improvement step
+    if (shouldImproveTranscription) {
+      try {
+        res.write(`data: ${JSON.stringify({ status: 'Improving transcription...', progress: 90 })}\n\n`);
+        console.log('Improving transcription...');
+        improvedText = await improveTranscription(transcriptionText);
+        console.log('Transcription improved');
+      } catch (error) {
+        console.error('Error improving transcription:', error);
+        res.write(`data: ${JSON.stringify({ status: 'Error improving transcription, using original', progress: 90 })}\n\n`);
+        improvedText = null;
+      }
     }
 
-    const stats = fs.statSync(finalPath);
-    console.log('Audio file stats:', {
-      path: finalPath,
-      size: stats.size,
-      isFile: stats.isFile(),
-      permissions: stats.mode
-    });
+    // Send final result
+    const result = {
+      original: transcriptionText,
+      improved: shouldImproveTranscription ? improvedText : null
+    };
 
-    // Create form data for OpenAI API
-    const formData = new FormData();
-    formData.append('file', fs.createReadStream(finalPath));
-    formData.append('model', 'whisper-1');
-    formData.append('language', 'fa');
-    formData.append('response_format', 'text');
+    res.write(`data: ${JSON.stringify({ status: 'Complete', progress: 100, result })}\n\n`);
+    res.end();
 
-    console.log('Sending request to OpenAI...');
+    // Cleanup files
+    try {
+      await fs.unlink(originalFilePath);
+      if (optimizedFilePath) {
+        await fs.unlink(optimizedFilePath);
+      }
+    } catch (error) {
+      console.error('Error cleaning up files:', error);
+    }
+
+  } catch (error) {
+    console.error('Error processing request:', error);
+    res.write(`data: ${JSON.stringify({ status: 'Error', error: error.message })}\n\n`);
+    res.end();
+
+    // Cleanup files on error
+    try {
+      if (originalFilePath) await fs.unlink(originalFilePath);
+      if (optimizedFilePath) await fs.unlink(optimizedFilePath);
+    } catch (cleanupError) {
+      console.error('Error cleaning up files after error:', cleanupError);
+    }
+  }
+});
+
+async function transcribeAudio(filePath) {
+  try {
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        ...formData.getHeaders()
+        'Content-Type': 'application/json',
       },
-      body: formData
+      body: JSON.stringify({
+        model: "whisper-1",
+        file: filePath,
+        language: "fa",
+        response_format: "text"
+      })
     });
 
-    console.log('OpenAI response status:', response.status);
-    
     if (!response.ok) {
       const errorData = await response.text();
       console.error('OpenAI API error response:', errorData);
-      res.write(`data: ${JSON.stringify({ 
-        status: 'Error',
-        progress: 0,
-        error: errorData
-      })}\n\n`);
       throw new Error(`OpenAI API error: ${errorData}`);
     }
 
     let transcription = await response.text();
     console.log('Transcription received, length:', transcription.length);
-    
-    // Send the transcription result
-    if (shouldImproveTranscription) {
-      console.log('Improving transcription...');
-      sendStatus('Improving', 80);
-      const improvedText = await improveTranscription(transcription);
-      sendStatus('Done', 100);
-      res.write(`data: ${JSON.stringify({ 
-        status: 'Done', 
-        progress: 100,
-        result: {
-          original: transcription,
-          improved: improvedText
-        }
-      })}\n\n`);
-    } else {
-      sendStatus('Done', 100);
-      res.write(`data: ${JSON.stringify({ 
-        status: 'Done', 
-        progress: 100,
-        result: {
-          original: transcription,
-          improved: null
-        }
-      })}\n\n`);
-    }
-    
-    res.end();
+    return transcription;
   } catch (error) {
-    console.error('Server error:', error);
-    res.write(`data: ${JSON.stringify({ 
-      status: 'Error',
-      progress: 0,
-      error: error.message || 'An unexpected error occurred'
-    })}\n\n`);
-    res.end();
-  } finally {
-    cleanup();
+    console.error('Error transcribing audio:', error);
+    throw error;
   }
-});
+}
 
 async function improveTranscription(text) {
   try {
